@@ -1,0 +1,48 @@
+name: Build DockerSnap Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to deploy
+        required: false
+        default: master
+      testing:
+        description: Testing workflow
+        required: false
+        type: boolean
+        default: false
+  push:
+    branches: 
+      - main
+    paths:
+      - 'DockerSnap.sh'
+      - 'Dockerfile'
+
+jobs:
+  build-and-push:
+    env:
+      REGISTRY: docker.io
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Docker login
+      run: |
+        echo "${{ secrets.DOCKER_PASSWORD }}" | docker login ${{ env.REGISTRY }} -u "${{ secrets.DOCKER_USER }}" --password-stdin
+    - name: Build DockerSnap Image
+      run: |
+        # Assuming Dockerfile is in the root and DockerSnap.sh is correctly placed
+        docker build . -t ${{ env.REGISTRY }}/${{ secrets.DOCKER_USER }}/dockersnap:latest
+    - name: Docker push (conditional)
+      if: github.event.inputs.testing == 'false' && github.event.inputs.branch == 'master'
+      run: |
+        docker push ${{ env.REGISTRY }}/${{ secrets.DOCKER_USER }}/dockersnap:latest
+    - name: Cleanup Docker Images
+      run: |
+        docker image prune -a --force
+    - name: Add summary details
+      if: always()
+      run: |
+        echo "## Summary Details" >> $GITHUB_STEP_SUMMARY
+        echo "* Docker Image: ${{ env.REGISTRY }}/${{ secrets.DOCKER_USER }}/dockersnap:latest" >> $GITHUB_STEP_SUMMARY
+        echo "* Branch: ${{ github.event.inputs.branch }}" >> $GITHUB_STEP_SUMMARY
