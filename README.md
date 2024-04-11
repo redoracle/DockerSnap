@@ -2,7 +2,7 @@
 This Bash script generates a docker-compose file (docker-compose-captured.yml) that replicates the settings of all currently running Docker containers on the host. It is a method for capturing the state of Docker containers and replicating them elsewhere or rebuilding the system as it is currently configured. This is especially useful when numerous containers have been launched using the basic "docker run..." command and it is difficult to recollect the particular commands for each container without inspecting them individually.
 
 <div style="text-align: center;">
-<img src="https://raw.githubusercontent.com/redoracle/DockerSnap/main/DockerSnap%20logo.webp" width="300" height="300">
+<img src="https://raw.githubusercontent.com/redoracle/DockerSnap/main/DockerSnap%20logo.webp" width="300" height="300" align="center">
 </div>
 
 ### How it Works
