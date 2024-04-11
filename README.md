@@ -22,3 +22,17 @@ This Bash script generates a docker-compose file (docker-compose-captured.yml) t
 Imagine you have two containers running on your machine; one for a web application and another for a database. Running this script would generate a `docker-compose-captured.yml` file that defines both containers, including their images, volumes, ports, and any custom configurations. This file can then be used to start the same containers with Docker Compose on another machine, replicating the original environment.
 
 For instance, if you had a MySQL database running in one container and a PHP application in another, the script would capture details like the MySQL version, the volume used for data persistence, the PHP image, linked environment variables, and network settings. By using the generated Docker Compose file, you can recreate the exact setup on a new host, ensuring that the application environment is consistent across different stages of development, testing, or production.
+
+
+### Building the Docker Image
+Save your Dockerfile in a directory with the DockerSnap.sh script. Then, navigate to this directory in your terminal and run the following command to build your Docker image. Replace dockersnap with your desired image name.
+
+```
+docker build -t dockersnap .
+```
+
+### Running the Container
+To run your Docker container and automatically remove it after you exit, use the --rm flag as follows. This command also assumes you need to mount the Docker socket into the container to allow it to interact with your host's Docker daemon, enabling the DockerSnap.sh script to inspect and manipulate Docker containers as if it were running on the host.
+```
+docker run -it --rm --name dockersnap-instance -v /var/run/docker.sock:/var/run/docker.sock dockersnap
+```
