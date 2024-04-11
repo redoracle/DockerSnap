@@ -1,6 +1,8 @@
 # DockerSnap
 This Bash script generates a docker-compose file (docker-compose-captured.yml) that replicates the settings of all currently running Docker containers on the host. It is a method for capturing the state of Docker containers and replicating them elsewhere or rebuilding the system as it is currently configured. This is especially useful when numerous containers have been launched using the basic "docker run..." command and it is difficult to recollect the particular commands for each container without inspecting them individually.
 
+<img src="[path_to_image](https://raw.githubusercontent.com/redoracle/WebToPDF-Crawler/main/WebToPDF%20Crawler%20Logo.webp](https://raw.githubusercontent.com/redoracle/DockerSnap/main/DockerSnap%20logo.webp)" width="200" height="200">
+
 ### How it Works
 1. **Initialization**: The script starts by defining the filename for the Docker Compose file and initializing it with a version header.
 2. **Capture Container Details**: For each running container, it captures various details including container name, image name, whether STDIN is open, TTY status, entrypoint, command, health check configuration, init status, restart policy, network mode, DNS servers, network name, and IP address.
