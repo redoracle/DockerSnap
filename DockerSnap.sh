@@ -47,6 +47,11 @@ docker ps -q | while read container_id; do
     dns_servers=$(docker inspect --format '{{range .HostConfig.Dns}}{{.}} {{end}}' $container_id)
     # Extract network details
     networks=$(docker inspect --format '{{json .NetworkSettings.Networks}}' $container_id)
+    # Extract cap_add
+    cap_add=$(docker inspect --format '{{json .HostConfig.CapAdd}}' $container_id | sed 's/^null$//')
+    # Extract ShmSize and Sysctls
+    shm_size=$(docker inspect --format '{{.HostConfig.ShmSize}}' $container_id)
+    sysctls=$(docker inspect --format '{{json .HostConfig.Sysctls}}' $container_id | sed 's/^null$//')
 
     debug_print "Container: $container_name"
     debug_print "Image: $image_name"
@@ -59,6 +64,9 @@ docker ps -q | while read container_id; do
     debug_print "Restart Policy: $restart_policy"
     debug_print "DNS Servers: $dns_servers"
     debug_print "Networks: $networks"
+    debug_print "CapAdd: $cap_add"
+    debug_print "ShmSize: $shm_size"
+    debug_print "Sysctls: $sysctls"
 
     # Begin constructing the service definition in the Docker Compose file
     echo "  $container_name:" >> $COMPOSE_FILE
@@ -82,6 +90,23 @@ docker ps -q | while read container_id; do
         [ ! -z "$restart_policy" ] && echo "    restart: $restart_policy" >> $COMPOSE_FILE
     fi
     [ ! -z "$dns_servers" ] && echo "    dns: [$dns_servers]" >> $COMPOSE_FILE
+
+    # Include cap_add if applicable
+    if [ ! -z "$cap_add" ] && [ "$cap_add" != "[]" ]; then
+        echo "    cap_add:" >> $COMPOSE_FILE
+        echo "$cap_add" | jq -r '.[] | "      - \(.)."' >> $COMPOSE_FILE
+    fi
+
+    # Include ShmSize if applicable
+    if [ "$shm_size" -gt 0 ]; then
+        echo "    shm_size: $shm_size" >> $COMPOSE_FILE
+    fi
+
+    # Include Sysctls if applicable
+    if [ ! -z "$sysctls" ] && [ "$sysctls" != "{}" ]; then
+        echo "    sysctls:" >> $COMPOSE_FILE
+        echo "$sysctls" | jq -r 'to_entries | .[] | "      \(.key): \(.value)"' >> $COMPOSE_FILE
+    fi
 
     # Handle port mappings
     ports=$(docker inspect --format '{{range $p, $conf := .NetworkSettings.Ports}}{{if $conf}}{{(index $conf 0).HostPort}}:{{$p}}{{"\n"}}{{end}}{{end}}' $container_id)
@@ -108,13 +133,12 @@ docker ps -q | while read container_id; do
             s/([^\\])"/\1\\"/g;              # Replace every unescaped " with \"
             s/\\\\"/"/g;                     # Undo double escaping of already escaped quotes
             s/(.*\\"[^"]*)\\"$/\1"/;         # Leave the last double quote unchanged
-            s/\$/\\\$/g;                      # Escape any dollar signs
-            s/^(.*- \\")/      - "/;     # Unescape the first double quote if needed
+            s/\$/\\\$/g;                     # Escape any dollar signs
+            s/^(.*- \\")/      - "/;         # Unescape the first double quote if needed
         ')
         echo "    environment:" >> $COMPOSE_FILE
         echo "$envs" >> $COMPOSE_FILE
     fi
-
 
     # Assign the container to networks, specifying IP addresses if available
     custom_networks=$(echo "$networks" | jq -r 'to_entries[] | select(.key != "bridge" and .key != "host") | "\(.key)"')
