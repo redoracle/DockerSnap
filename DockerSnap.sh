@@ -8,6 +8,19 @@
 
 # Filename for the docker-compose file
 COMPOSE_FILE=docker-compose-captured.yml
+DEBUG=false
+
+# Check if --debug flag is passed
+if [[ "$1" == "--debug" ]]; then
+    DEBUG=true
+fi
+
+# Debug function to print grabbed values
+debug_print() {
+    if [ "$DEBUG" == true ]; then
+        echo -e "$1"
+    fi
+}
 
 # Start of the docker-compose file with Docker Compose version
 echo "version: '3.7'" > $COMPOSE_FILE
@@ -31,14 +44,21 @@ docker ps -q | while read container_id; do
     init=$(docker inspect --format '{{.HostConfig.Init}}' $container_id)
     restart_policy=$(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' $container_id)
     # Extract network settings like network mode and DNS servers
-    network_mode=$(docker inspect --format '{{.HostConfig.NetworkMode}}' $container_id)
     dns_servers=$(docker inspect --format '{{range .HostConfig.Dns}}{{.}} {{end}}' $container_id)
-    # Extract network name and IP address for network assignments
-    network_name=$(docker inspect --format '{{range $key, $_ := .NetworkSettings.Networks}}{{$key}}{{end}}' $container_id)
-    ip_address=$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $container_id)
+    # Extract network details
+    networks=$(docker inspect --format '{{json .NetworkSettings.Networks}}' $container_id)
 
-    # Accumulate unique network names for later definition
-    networks_list+=("$network_name")
+    debug_print "Container: $container_name"
+    debug_print "Image: $image_name"
+    debug_print "Stdin Open: $stdin_open"
+    debug_print "TTY: $tty"
+    debug_print "Entrypoint: $entrypoint"
+    debug_print "Command: $cmd"
+    debug_print "Healthcheck: $healthcheck_test"
+    debug_print "Init: $init"
+    debug_print "Restart Policy: $restart_policy"
+    debug_print "DNS Servers: $dns_servers"
+    debug_print "Networks: $networks"
 
     # Begin constructing the service definition in the Docker Compose file
     echo "  $container_name:" >> $COMPOSE_FILE
@@ -56,7 +76,11 @@ docker ps -q | while read container_id; do
         echo "      test: $healthcheck_test" >> $COMPOSE_FILE
     fi
     [ "$init" == "true" ] && echo "    init: true" >> $COMPOSE_FILE
-    [ ! -z "$restart_policy" ] && echo "    restart: $restart_policy" >> $COMPOSE_FILE
+    if [ "$restart_policy" == "no" ]; then
+        echo "    restart: unless-stopped" >> $COMPOSE_FILE
+    else
+        [ ! -z "$restart_policy" ] && echo "    restart: $restart_policy" >> $COMPOSE_FILE
+    fi
     [ ! -z "$dns_servers" ] && echo "    dns: [$dns_servers]" >> $COMPOSE_FILE
 
     # Handle port mappings
@@ -78,15 +102,25 @@ docker ps -q | while read container_id; do
     # Include environment variables
     envs=$(docker inspect --format '{{range .Config.Env}}{{printf "      - \"%s\"\n" .}}{{end}}' $container_id)
     if [ ! -z "$envs" ]; then
+        # Use sed to process the envs variable
+        envs=$(echo "$envs" | sed -E '
+            s/^(.*=)/\1/;                    # Match everything up to the first "=" and leave it as is
+            s/([^\\])"/\1\\"/g;              # Replace every unescaped " with \"
+            s/\\\\"/"/g;                     # Undo double escaping of already escaped quotes
+            s/(.*\\"[^"]*)\\"$/\1"/;         # Leave the last double quote unchanged
+            s/\$/\\\$/g;                      # Escape any dollar signs
+            s/^(.*- \\")/      - "/;     # Unescape the first double quote if needed
+        ')
         echo "    environment:" >> $COMPOSE_FILE
         echo "$envs" >> $COMPOSE_FILE
     fi
 
+
     # Assign the container to networks, specifying IP addresses if available
-    if [ ! -z "$network_name" ]; then
+    custom_networks=$(echo "$networks" | jq -r 'to_entries[] | select(.key != "bridge" and .key != "host") | "\(.key)"')
+    if [ ! -z "$custom_networks" ]; then
         echo "    networks:" >> $COMPOSE_FILE
-        echo "      $network_name:" >> $COMPOSE_FILE
-        echo "        ipv4_address: $ip_address" >> $COMPOSE_FILE
+        echo "$networks" | jq -r 'to_entries[] | select(.key != "bridge" and .key != "host") | "      \(.key):\n        ipv4_address: \(.value.IPAddress)"' >> $COMPOSE_FILE
     fi
 
     # Add a newline for readability between service definitions
@@ -94,15 +128,14 @@ docker ps -q | while read container_id; do
 
 done
 
-# Exclude the default 'bridge' network and define other networks as external
-networks_list=($(echo "${networks_list[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' '))
-if [ ${#networks_list[@]} -gt 0 ]; then
+# Extract unique network names and append them to the end of the file
+unique_networks=$(grep -A 1 "networks:" $COMPOSE_FILE | grep -v "networks:" | grep -v "^--$" | awk '{print $1}' | sort -u)
+
+if [ ! -z "$unique_networks" ]; then
     echo "networks:" >> $COMPOSE_FILE
-    for net in "${networks_list[@]}"; do
-        if [ "$net" != "bridge" ]; then
-            echo "  $net:" >> $COMPOSE_FILE
-            echo "    external: true" >> $COMPOSE_FILE
-        fi
+    for net in $unique_networks; do
+        echo "  $net" >> $COMPOSE_FILE
+        echo "    external: true" >> $COMPOSE_FILE
     done
 fi
 
