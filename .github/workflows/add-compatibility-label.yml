@@ -4,8 +4,6 @@ on:
   workflow_dispatch:  # Allows manual trigger
   pull_request:       # Automatically triggers on PR events
     types: [opened, synchronize]
-    branches:
-      - main  # Adjust if your default branch is different
 
 permissions:
   contents: write
@@ -19,6 +17,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       github.actor == 'dependabot[bot]' ||
       github.actor == 'dependabot-preview[bot]'
+      
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
@@ -29,10 +28,39 @@ jobs:
           # Placeholder for actual compatibility analysis
           # For demonstration, we'll set a fixed compatibility score
           COMPATIBILITY_SCORE=100
-          echo "score=$COMPATIBILITY_SCORE" >> $GITHUB_OUTPUT
+          echo "COMPATIBILITY_SCORE=$COMPATIBILITY_SCORE" >> $GITHUB_ENV  # Store the score as an environment variable
 
-      - name: Add Compatibility Label
-        uses: actions-ecosystem/action-add-labels@v1
+      - name: Add Compatibility Labels to All Dependabot PRs
+        uses: actions/github-script@v6
         with:
-          github_token: "${{ secrets.GITHUB_TOKEN }}"
-          labels: "compatibility: ${{ steps.compatibility.outputs.score }}%"
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            // Fetch all open PRs
+            const pullRequests = await github.rest.pulls.list({
+              owner: owner,
+              repo: repo,
+              state: 'open'
+            });
+
+            // Access the compatibility score from the environment variable
+            const compatibilityScore = process.env.COMPATIBILITY_SCORE;
+
+            // Define labels to add
+            const labels = [`compatibility: ${compatibilityScore}%`];
+
+            // Iterate through PRs
+            for (const pr of pullRequests.data) {
+              // Only apply to Dependabot PRs
+              if (pr.user.login === 'dependabot[bot]' || pr.user.login === 'dependabot-preview[bot]') {
+                console.log(`Adding label to PR #${pr.number}`);
+                await github.rest.issues.addLabels({
+                  owner: owner,
+                  repo: repo,
+                  issue_number: pr.number,
+                  labels: labels
+                });
+              }
+            }
