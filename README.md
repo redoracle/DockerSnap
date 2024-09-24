@@ -1,38 +1,204 @@
-# DockerSnap
-This Bash script generates a docker-compose file (docker-compose-captured.yml) that replicates the settings of all currently running Docker containers on the host. It is a method for capturing the state of Docker containers and replicating them elsewhere or rebuilding the system as it is currently configured. This is especially useful when numerous containers have been launched using the basic "docker run..." command and it is difficult to recollect the particular commands for each container without inspecting them individually.
+# DockSnap
 
-<div style="text-align: center;">
-<img src="https://raw.githubusercontent.com/redoracle/DockerSnap/main/DockerSnap%20logo.webp" width="300" height="300" align="center">
-</div>
+![DockSnap Logo](https://raw.githubusercontent.com/redoracle/DockerSnap/main/DockerSnap%20logo.webp)
 
-### How it Works
-1. **Initialization**: The script starts by defining the filename for the Docker Compose file and initializing it with a version header.
-2. **Capture Container Details**: For each running container, it captures various details including container name, image name, whether STDIN is open, TTY status, entrypoint, command, health check configuration, init status, restart policy, network mode, DNS servers, network name, and IP address.
-3. **Escape Home Directory**: It escapes the user's home directory in paths for compatibility.
-4. **Handle Dynamic Configuration**: It dynamically handles the presence of configurations like entrypoints, commands, health checks, initialization status, restart policies, DNS servers, ports, volumes (with the user's home directory path masked for privacy and portability), environment variables, and network assignments.
-5. **Avoid Duplicate Network Definitions**: It ensures networks are defined once and excludes the default bridge network from being explicitly defined in the Docker Compose file.
-6. **Compose File Generation**: The generated `docker-compose-captured.yml` includes detailed service definitions for each container, making it possible to recreate the containers' state using Docker Compose.
+**DockSnap** is a robust Docker Environment Snapshot Tool designed to generate a comprehensive `docker-compose-captured.yml` file. This file accurately replicates the configurations of all currently running Docker containers on your host system. Whether you're aiming for backup, documentation, replication, or migration, DockSnap streamlines the process of capturing and reproducing your Docker environment with ease.
 
-### Why It's Useful
-- **Backup and Replication**: Allows for easy backup of container configurations for disaster recovery or replication of environments (e.g., from development to production).
-- **Documentation**: Provides a snapshot of the current state of containers for documentation purposes.
-- **Migration**: Facilitates migration of Docker containers between hosts or cloud environments by capturing their configurations in a portable format.
+## Table of Contents
 
-### Example
-Imagine you have two containers running on your machine; one for a web application and another for a database. Running this script would generate a `docker-compose-captured.yml` file that defines both containers, including their images, volumes, ports, and any custom configurations. This file can then be used to start the same containers with Docker Compose on another machine, replicating the original environment.
+- [Features](#features)
+- [How It Works](#how-it-works)
+- [Why It's Useful](#why-its-useful)
+- [Installation](#installation)
+  - [Prerequisites](#prerequisites)
+  - [Building the Docker Image](#building-the-docker-image)
+- [Usage](#usage)
+  - [Running DockSnap](#running-dockersnap)
+  - [Debug Mode](#debug-mode)
+- [Example](#example)
+- [Additional Recommendations](#additional-recommendations)
+- [License](#license)
 
-For instance, if you had a MySQL database running in one container and a PHP application in another, the script would capture details like the MySQL version, the volume used for data persistence, the PHP image, linked environment variables, and network settings. By using the generated Docker Compose file, you can recreate the exact setup on a new host, ensuring that the application environment is consistent across different stages of development, testing, or production.
+## Features
 
+- **Comprehensive Snapshot**: Captures detailed configurations of all running Docker containers, including environment variables, volumes, ports, networks, and more.
+- **Dependency Checks**: Ensures all required tools (`docker`, `jq`, `sed`) are installed before execution.
+- **Error Handling**: Robust error handling to prevent unexpected failures.
+- **Modular Design**: Organized into functions for better readability and maintenance.
+- **YAML Compliance**: Generates properly formatted and indented YAML files compatible with Docker Compose.
+- **Customizable Output**: Allows for easy customization and extension.
+
+## How It Works
+
+1. **Initialization**: Defines the output filename (`docker-compose-captured.yml`) and initializes it with the Docker Compose version header.
+2. **Dependency Verification**: Checks for the presence of required tools (`docker`, `jq`, `sed`) to ensure smooth execution.
+3. **Container Inspection**: Iterates through each running Docker container, extracting essential details such as:
+   - Container name and image
+   - STDIN openness and TTY status
+   - Entrypoint and command configurations
+   - Health check settings
+   - Initialization and restart policies
+   - Network configurations, including DNS servers and IP addresses
+   - Volume and environment variable mappings
+4. **Configuration Handling**: Dynamically includes configurations based on their presence, ensuring flexibility and accuracy.
+5. **Network Management**: Collects and defines unique networks, excluding default ones like `bridge` and `host`, to avoid duplication.
+6. **YAML Generation**: Constructs a well-formatted `docker-compose-captured.yml` file with detailed service definitions for each container, facilitating easy recreation of the Docker environment using Docker Compose.
+
+## Why It's Useful
+
+- **Backup and Replication**: Easily back up container configurations for disaster recovery or replicate environments across different systems.
+- **Documentation**: Generate a snapshot of your current Docker setup for documentation and auditing purposes.
+- **Migration**: Simplify the migration of Docker containers between hosts or cloud environments by exporting configurations in a portable format.
+- **Consistency**: Ensure consistent environments across development, testing, and production stages by using the same Docker Compose configurations.
+
+## Installation
+
+### Prerequisites
+
+Before using DockSnap, ensure that the following tools are installed on your system:
+
+- **Docker**: To manage Docker containers.
+- **jq**: A lightweight and flexible command-line JSON processor.
+- **sed**: A stream editor for filtering and transforming text.
+
+You can install these dependencies using your package manager. For example, on Debian-based systems:
+
+```bash
+sudo apt update
+sudo apt install -y docker.io jq sed
+```
 
 ### Building the Docker Image
-Save your Dockerfile in a directory with the DockerSnap.sh script. Then, navigate to this directory in your terminal and run the following command to build your Docker image. Replace dockersnap with your desired image name.
 
-```
-docker build -t dockersnap .
-```
+1. **Clone the Repository**: First, clone the DockSnap repository to your local machine.
 
-### Running the Container
-To run your Docker container and automatically remove it after you exit, use the --rm flag as follows. This command also assumes you need to mount the Docker socket into the container to allow it to interact with your host's Docker daemon, enabling the DockerSnap.sh script to inspect and manipulate Docker containers as if it were running on the host.
-```
+    ```bash
+    git clone https://github.com/redoracle/DockerSnap.git
+    cd DockerSnap
+    ```
+
+2. **Build the Docker Image**: Use the provided `Dockerfile` to build the DockSnap Docker image. Replace `dockersnap` with your desired image name if needed.
+
+    ```bash
+    docker build -t dockersnap .
+    ```
+
+## Usage
+
+### Running DockSnap
+
+To execute DockSnap and generate the `docker-compose-captured.yml` file, run the following command. This command mounts the Docker socket to allow DockSnap to interact with the Docker daemon on the host.
+
+```bash
 docker run -it --rm --name dockersnap-instance -v /var/run/docker.sock:/var/run/docker.sock dockersnap
 ```
+
+Upon successful execution, a `docker-compose-captured.yml` file will be generated in the current directory, containing the configurations of all running Docker containers.
+
+### Debug Mode
+
+For detailed logs and insights into the script's execution, you can enable debug mode by passing the `--debug` flag:
+
+```bash
+docker run -it --rm --name dockersnap-instance -v /var/run/docker.sock:/var/run/docker.sock dockersnap --debug
+```
+
+In debug mode, DockSnap will output additional information about the captured values and processing steps, aiding in troubleshooting and verification.
+
+## Example
+
+Imagine you have two running Docker containers: one for a web application and another for a database. Running DockSnap will generate a `docker-compose-captured.yml` file that defines both containers with their respective configurations.
+
+**Before Running DockSnap:**
+
+- **Web Application Container**:
+  - Image: `nginx:latest`
+  - Ports: `80:80`
+  - Volumes: `/var/www/html:/usr/share/nginx/html`
+  - Environment Variables: `ENV=production`
+  
+- **Database Container**:
+  - Image: `mysql:5.7`
+  - Ports: `3306:3306`
+  - Volumes: `/var/lib/mysql:/var/lib/mysql`
+  - Environment Variables: `MYSQL_ROOT_PASSWORD=secret`
+
+**After Running DockSnap:**
+
+A `docker-compose-captured.yml` file is generated with the following content:
+
+```yaml
+version: '3.7'
+services:
+  web_app:
+    image: "nginx:latest"
+    container_name: "web_app"
+    hostname: "web_appG"
+    stdin_open: false
+    tty: false
+    ports:
+      - "80:80"
+    volumes:
+      - "/var/www/html:/usr/share/nginx/html"
+    environment:
+      - "ENV=production"
+    networks:
+      "bridge":
+        ipv4_address: "null"
+
+  database:
+    image: "mysql:5.7"
+    container_name: "database"
+    hostname: "databaseG"
+    stdin_open: false
+    tty: false
+    ports:
+      - "3306:3306"
+    volumes:
+      - "/var/lib/mysql:/var/lib/mysql"
+    environment:
+      - "MYSQL_ROOT_PASSWORD=secret"
+    networks:
+      "bridge":
+        ipv4_address: "null"
+
+networks:
+  "bridge":
+    external: true
+```
+
+You can now use this `docker-compose-captured.yml` file to recreate the same environment on another machine:
+
+```bash
+docker-compose -f docker-compose-captured.yml up -d
+```
+
+This ensures that both the web application and database containers are set up with identical configurations, facilitating seamless environment replication.
+
+## Additional Recommendations
+
+- **YAML Validation**: After generating the `docker-compose-captured.yml` file, validate its syntax using tools like [`yamllint`](https://github.com/adrienverge/yamllint) to ensure correctness.
+
+    ```bash
+    yamllint docker-compose-captured.yml
+    ```
+
+- **Backup Existing Compose File**: To prevent accidental overwriting of existing `docker-compose-captured.yml` files, consider backing them up before generation.
+
+    ```bash
+    if [ -f "docker-compose-captured.yml" ]; then
+        cp docker-compose-captured.yml "docker-compose-captured.yml.bak_$(date +%F_%T)"
+    fi
+    ```
+
+- **Customization**: Enhance DockSnap by adding options to specify the output filename, exclude certain containers, or include additional configurations based on user preferences.
+
+- **Automation**: Integrate DockSnap into your CI/CD pipelines to automate environment snapshots during deployment processes.
+
+## License
+
+This project is licensed under the [MIT License](https://opensource.org/licenses/MIT). See the [LICENSE](LICENSE) file for details.
+
+---
+
+*Created with ❤️ by [Redoracle](https://github.com/redoracle)*
