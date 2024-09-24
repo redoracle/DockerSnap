@@ -13,7 +13,7 @@ jobs:
   auto-merge:
     runs-on: ubuntu-latest
     if: |
-      github.actor == 'dependabot[bot]' || github.actor == 'dependabot-preview[bot]'
+      github.actor == 'dependabot[bot]' || 'dependabot' || github.actor == 'dependabot-preview[bot]'
 
     steps:
       # Step 1: Checkout the repository
