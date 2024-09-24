@@ -6,52 +6,88 @@
 # License: MIT License
 # Description: Generates a docker-compose file that captures the state of all currently running Docker containers on the system. It's designed for backup, documentation, replication, and migration purposes.
 
+set -euo pipefail
+
 # Filename for the docker-compose file
-COMPOSE_FILE=docker-compose-captured.yml
+COMPOSE_FILE="docker-compose-captured.yml"
 DEBUG=false
 
-# Check if --debug flag is passed
-if [[ "$1" == "--debug" ]]; then
-    DEBUG=true
-fi
+# Function to check if required commands are available
+check_dependencies() {
+    local dependencies=("docker" "jq" "sed")
+    for cmd in "${dependencies[@]}"; do
+        if ! command -v "$cmd" &>/dev/null; then
+            echo "Error: Required command '$cmd' is not installed." >&2
+            exit 1
+        fi
+    done
+}
 
-# Debug function to print grabbed values
+# Function to print debug messages
 debug_print() {
-    if [ "$DEBUG" == true ]; then
+    if [ "$DEBUG" = true ]; then
         echo -e "$1"
     fi
 }
 
-# Start of the docker-compose file with Docker Compose version
-echo "version: '3.7'" > $COMPOSE_FILE
-echo "services:" >> $COMPOSE_FILE
+# Function to escape YAML special characters in environment variables
+escape_yaml() {
+    echo "$1" | sed 's/"/\\"/g' | sed 's/\$/\\$/g'
+}
 
-# Prepare the user's home directory path for inclusion in the Docker Compose file
-escaped_home=$(echo $HOME | sed 's|/|\\/|g')
+# Function to map Docker restart policies to Docker Compose equivalents
+map_restart_policy() {
+    local policy="$1"
+    case "$policy" in
+        no)
+            echo "no"
+            ;;
+        on-failure)
+            echo "on-failure"
+            ;;
+        unless-stopped)
+            echo "unless-stopped"
+            ;;
+        always)
+            echo "always"
+            ;;
+        *)
+            echo "$policy"
+            ;;
+    esac
+}
 
-# Loop through each running Docker container to capture its configuration
-docker ps -q | while read container_id; do
+# Function to generate service definition for a container
+generate_service() {
+    local container_id="$1"
+    local compose_file="$2"
+    local -n networks_ref="$3"  # Reference to networks array
+
+    # Extract all necessary information in a single docker inspect call
+    local inspect_json
+    inspect_json=$(docker inspect "$container_id")
+
     # Extract container and image details
-    container_name=$(docker inspect --format '{{.Name}}' $container_id | sed 's/^\///')
-    image_name=$(docker inspect --format '{{.Config.Image}}' $container_id)
-    # Extract configurations like STDIN openness, TTY status, entrypoint, and command
-    stdin_open=$(docker inspect --format '{{.Config.OpenStdin}}' $container_id)
-    tty=$(docker inspect --format '{{.Config.Tty}}' $container_id)
-    entrypoint=$(docker inspect --format '{{json .Config.Entrypoint}}' $container_id | sed 's/^null$//')
-    cmd=$(docker inspect --format '{{json .Config.Cmd}}' $container_id | sed 's/^null$//')
-    # Extract healthcheck configuration, init status, and restart policy
-    healthcheck_test=$(docker inspect --format '{{if .Config.Healthcheck}}{{json .Config.Healthcheck.Test}}{{else}}""{{end}}' $container_id | sed 's/^null$//')
-    init=$(docker inspect --format '{{.HostConfig.Init}}' $container_id)
-    restart_policy=$(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' $container_id)
-    # Extract network settings like network mode and DNS servers
-    dns_servers=$(docker inspect --format '{{range .HostConfig.Dns}}{{.}} {{end}}' $container_id)
-    # Extract network details
-    networks=$(docker inspect --format '{{json .NetworkSettings.Networks}}' $container_id)
-    # Extract cap_add
-    cap_add=$(docker inspect --format '{{json .HostConfig.CapAdd}}' $container_id | sed 's/^null$//')
-    # Extract ShmSize and Sysctls
-    shm_size=$(docker inspect --format '{{.HostConfig.ShmSize}}' $container_id)
-    sysctls=$(docker inspect --format '{{json .HostConfig.Sysctls}}' $container_id | sed 's/^null$//')
+    local container_name image_name stdin_open tty entrypoint cmd healthcheck_test init restart_policy dns_servers networks cap_add shm_size sysctls ports volumes envs
+    container_name=$(echo "$inspect_json" | jq -r '.[0].Name' | sed 's|^/||')
+    image_name=$(echo "$inspect_json" | jq -r '.[0].Config.Image')
+    stdin_open=$(echo "$inspect_json" | jq -r '.[0].Config.OpenStdin')
+    tty=$(echo "$inspect_json" | jq -r '.[0].Config.Tty')
+    entrypoint=$(echo "$inspect_json" | jq -c '.[0].Config.Entrypoint // empty')
+    cmd=$(echo "$inspect_json" | jq -c '.[0].Config.Cmd // empty')
+    healthcheck_test=$(echo "$inspect_json" | jq -c '.[0].Config.Healthcheck.Test // empty')
+    init=$(echo "$inspect_json" | jq -r '.[0].HostConfig.Init')
+    restart_policy=$(echo "$inspect_json" | jq -r '.[0].HostConfig.RestartPolicy.Name')
+    dns_servers=$(echo "$inspect_json" | jq -r '.[0].HostConfig.Dns[]?' | paste -sd "," -)
+    networks=$(echo "$inspect_json" | jq -c '.[0].NetworkSettings.Networks')
+    cap_add=$(echo "$inspect_json" | jq -c '.[0].HostConfig.CapAdd // empty')
+    shm_size=$(echo "$inspect_json" | jq -r '.[0].HostConfig.ShmSize')
+    sysctls=$(echo "$inspect_json" | jq -c '.[0].HostConfig.Sysctls // empty')
+    ports=$(echo "$inspect_json" | jq -r '.[0].NetworkSettings.Ports // empty')
+    volumes=$(echo "$inspect_json" | jq -r '.[0].Mounts[]? | "\(.Source):\(.Destination)"' | sed "s|$escaped_home|\$HOME|g" | awk '{print "      - \"" $0 "\""}')
+    envs=$(echo "$inspect_json" | jq -r '.[0].Config.Env[]?' | while IFS= read -r env; do
+        echo "      - \"$(escape_yaml "$env")\""
+    done)
 
     debug_print "Container: $container_name"
     debug_print "Image: $image_name"
@@ -69,98 +105,148 @@ docker ps -q | while read container_id; do
     debug_print "Sysctls: $sysctls"
 
     # Begin constructing the service definition in the Docker Compose file
-    echo "  $container_name:" >> $COMPOSE_FILE
-    echo "    image: $image_name" >> $COMPOSE_FILE
-    echo "    container_name: $container_name" >> $COMPOSE_FILE
-    # Include configurations such as STDIN openness, TTY status, entrypoint, and command
-    echo "    hostname: ${container_name}G" >> $COMPOSE_FILE
-    echo "    stdin_open: $stdin_open" >> $COMPOSE_FILE
-    echo "    tty: $tty" >> $COMPOSE_FILE
-    [ ! -z "$entrypoint" ] && echo "    entrypoint: $entrypoint" >> $COMPOSE_FILE
-    [ ! -z "$cmd" ] && echo "    command: $cmd" >> $COMPOSE_FILE
-    # Include healthcheck, init status, restart policy, and DNS servers if applicable
-    if [ ! -z "$healthcheck_test" ] && [ "$healthcheck_test" != "[]" ] && [ "$healthcheck_test" != '""' ]; then
-        echo "    healthcheck:" >> $COMPOSE_FILE
-        echo "      test: $healthcheck_test" >> $COMPOSE_FILE
-    fi
-    [ "$init" == "true" ] && echo "    init: true" >> $COMPOSE_FILE
-    if [ "$restart_policy" == "no" ]; then
-        echo "    restart: unless-stopped" >> $COMPOSE_FILE
-    else
-        [ ! -z "$restart_policy" ] && echo "    restart: $restart_policy" >> $COMPOSE_FILE
-    fi
-    [ ! -z "$dns_servers" ] && echo "    dns: [$dns_servers]" >> $COMPOSE_FILE
+    {
+        echo "  \"$container_name\":"
+        echo "    image: \"$image_name\""
+        echo "    container_name: \"$container_name\""
+        echo "    hostname: \"${container_name}G\""
+        echo "    stdin_open: $stdin_open"
+        echo "    tty: $tty"
 
-    # Include cap_add if applicable
-    if [ ! -z "$cap_add" ] && [ "$cap_add" != "[]" ]; then
-        echo "    cap_add:" >> $COMPOSE_FILE
-        echo "$cap_add" | jq -r '.[] | "      - \(.)."' >> $COMPOSE_FILE
+        if [ -n "$entrypoint" ]; then
+            echo "    entrypoint: $entrypoint"
+        fi
+
+        if [ -n "$cmd" ]; then
+            echo "    command: $cmd"
+        fi
+
+        if [ -n "$healthcheck_test" ] && [ "$healthcheck_test" != "[]" ] && [ "$healthcheck_test" != "null" ]; then
+            echo "    healthcheck:"
+            echo "      test: $healthcheck_test"
+        fi
+
+        if [ "$init" = "true" ]; then
+            echo "    init: true"
+        fi
+
+        if [ -n "$restart_policy" ] && [ "$restart_policy" != "no" ]; then
+            local mapped_policy
+            mapped_policy=$(map_restart_policy "$restart_policy")
+            echo "    restart: \"$mapped_policy\""
+        elif [ "$restart_policy" = "no" ]; then
+            echo "    restart: \"no\""
+        fi
+
+        if [ -n "$dns_servers" ]; then
+            echo "    dns: [$(echo "$dns_servers" | sed 's/,/", "/g' | sed 's/^/"/; s/$/"/')]"
+        fi
+
+        if [ -n "$cap_add" ] && [ "$cap_add" != "[]" ]; then
+            echo "    cap_add:"
+            echo "$cap_add" | jq -r '.[]' | while read -r cap; do
+                echo "      - \"$cap\""
+            done
+        fi
+
+        if [ "$shm_size" -gt 0 ]; then
+            echo "    shm_size: \"$shm_size\""
+        fi
+
+        if [ -n "$sysctls" ] && [ "$sysctls" != "{}" ]; then
+            echo "    sysctls:"
+            echo "$sysctls" | jq -r 'to_entries[] | "      \(.key): \"\(.value)\""' 
+        fi
+
+        # Handle port mappings
+        port_mappings=$(echo "$inspect_json" | jq -r '.[0].NetworkSettings.Ports | to_entries[]? | select(.value != null) | "\(.value[0].HostPort):\(.key)"')
+        if [ -n "$port_mappings" ]; then
+            echo "    ports:"
+            echo "$port_mappings" | while read -r port; do
+                echo "      - \"$port\""
+            done
+        fi
+
+        # Handle volume mappings
+        if [ -n "$volumes" ]; then
+            echo "    volumes:"
+            echo "$volumes"
+        fi
+
+        # Include environment variables
+        if [ -n "$envs" ]; then
+            echo "    environment:"
+            echo "$envs"
+        fi
+
+        # Assign the container to networks, specifying IP addresses if available
+        custom_networks=$(echo "$networks" | jq -r 'to_entries[] | select(.key != "bridge" and .key != "host") | .key')
+        if [ -n "$custom_networks" ]; then
+            echo "    networks:"
+            echo "$networks" | jq -r 'to_entries[] | select(.key != "bridge" and .key != "host") | "      " + .key + ":\n        ipv4_address: " + (.value.IPAddress // "null")' | while IFS= read -r network_def; do
+                local net_name ip_addr
+                net_name=$(echo "$network_def" | awk -F':' '{print $1}' | xargs)
+                ip_addr=$(echo "$network_def" | awk -F':' '{print $2}' | xargs)
+                echo "      \"$net_name\":"
+                if [ "$ip_addr" != "null" ]; then
+                    echo "        ipv4_address: \"$ip_addr\""
+                fi
+                # Collect unique networks for later
+                networks_ref+=("$net_name")
+            done
+        fi
+
+        echo ""
+    } >> "$compose_file"
+}
+
+# Function to generate networks section
+generate_networks_section() {
+    local compose_file="$1"
+    shift
+    local networks=("$@")
+
+    if [ "${#networks[@]}" -eq 0 ]; then
+        return
     fi
 
-    # Include ShmSize if applicable
-    if [ "$shm_size" -gt 0 ]; then
-        echo "    shm_size: $shm_size" >> $COMPOSE_FILE
-    fi
+    # Get unique networks
+    local unique_networks
+    unique_networks=($(printf "%s\n" "${networks[@]}" | sort -u))
 
-    # Include Sysctls if applicable
-    if [ ! -z "$sysctls" ] && [ "$sysctls" != "{}" ]; then
-        echo "    sysctls:" >> $COMPOSE_FILE
-        echo "$sysctls" | jq -r 'to_entries | .[] | "      \(.key): \(.value)"' >> $COMPOSE_FILE
-    fi
+    echo "networks:" >> "$compose_file"
+    for net in "${unique_networks[@]}"; do
+        echo "  \"$net\":" >> "$compose_file"
+        echo "    external: true" >> "$compose_file"
+    done
+}
 
-    # Handle port mappings
-    ports=$(docker inspect --format '{{range $p, $conf := .NetworkSettings.Ports}}{{if $conf}}{{(index $conf 0).HostPort}}:{{$p}}{{"\n"}}{{end}}{{end}}' $container_id)
-    if [ ! -z "$ports" ]; then
-        echo "    ports:" >> $COMPOSE_FILE
-        echo "$ports" | while read port; do
-            echo "      - \"$port\"" >> $COMPOSE_FILE
-        done
-    fi
+# Parse arguments
+if [[ "${1-}" == "--debug" ]]; then
+    DEBUG=true
+fi
 
-    # Handle volume mappings, substituting the actual home directory path with a placeholder
-    volumes=$(docker inspect --format '{{range .Mounts}}{{printf "      - \"%s:%s\"\n" .Source .Destination}}{{end}}' $container_id | sed "s|$escaped_home|\$HOME|g")
-    if [ ! -z "$volumes" ]; then
-        echo "    volumes:" >> $COMPOSE_FILE
-        echo "$volumes" >> $COMPOSE_FILE
-    fi
+# Check dependencies
+check_dependencies
 
-    # Include environment variables
-    envs=$(docker inspect --format '{{range .Config.Env}}{{printf "      - \"%s\"\n" .}}{{end}}' $container_id)
-    if [ ! -z "$envs" ]; then
-        # Use sed to process the envs variable
-        envs=$(echo "$envs" | sed -E '
-            s/^(.*=)/\1/;                    # Match everything up to the first "=" and leave it as is
-            s/([^\\])"/\1\\"/g;              # Replace every unescaped " with \"
-            s/\\\\"/"/g;                     # Undo double escaping of already escaped quotes
-            s/(.*\\"[^"]*)\\"$/\1"/;         # Leave the last double quote unchanged
-            s/\$/\\\$/g;                     # Escape any dollar signs
-            s/^(.*- \\")/      - "/;         # Unescape the first double quote if needed
-        ')
-        echo "    environment:" >> $COMPOSE_FILE
-        echo "$envs" >> $COMPOSE_FILE
-    fi
+# Start of the docker-compose file with Docker Compose version
+{
+    echo "version: '3.7'"
+    echo "services:"
+} > "$COMPOSE_FILE"
 
-    # Assign the container to networks, specifying IP addresses if available
-    custom_networks=$(echo "$networks" | jq -r 'to_entries[] | select(.key != "bridge" and .key != "host") | "\(.key)"')
-    if [ ! -z "$custom_networks" ]; then
-        echo "    networks:" >> $COMPOSE_FILE
-        echo "$networks" | jq -r 'to_entries[] | select(.key != "bridge" and .key != "host") | "      \(.key):\n        ipv4_address: \(.value.IPAddress)"' >> $COMPOSE_FILE
-    fi
+# Prepare the user's home directory path for inclusion in the Docker Compose file
+escaped_home=$(echo "$HOME" | sed 's|/|\\/|g')
 
-    # Add a newline for readability between service definitions
-    echo "" >> $COMPOSE_FILE
+# Initialize an array to collect network names
+declare -a networks_list
 
+# Loop through each running Docker container to capture its configuration
+docker ps -q | while read -r container_id; do
+    generate_service "$container_id" "$COMPOSE_FILE" networks_list
 done
 
 # Extract unique network names and append them to the end of the file
-unique_networks=$(grep -A 1 "networks:" $COMPOSE_FILE | grep -v "networks:" | grep -v "^--$" | awk '{print $1}' | sort -u)
-
-if [ ! -z "$unique_networks" ]; then
-    echo "networks:" >> $COMPOSE_FILE
-    for net in $unique_networks; do
-        echo "  $net" >> $COMPOSE_FILE
-        echo "    external: true" >> $COMPOSE_FILE
-    done
-fi
+generate_networks_section "$COMPOSE_FILE" "${networks_list[@]}"
 
 echo "Generated docker-compose file: $COMPOSE_FILE"
