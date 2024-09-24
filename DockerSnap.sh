@@ -18,6 +18,10 @@ check_dependencies() {
     for cmd in "${dependencies[@]}"; do
         if ! command -v "$cmd" &>/dev/null; then
             echo "Error: Required command '$cmd' is not installed." >&2
+            echo "Please install it using your package manager. For example:"
+            echo "  sudo apt-get install $cmd    # Debian/Ubuntu"
+            echo "  sudo yum install $cmd        # CentOS/RHEL"
+            echo "  brew install $cmd            # macOS with Homebrew"
             exit 1
         fi
     done
@@ -32,27 +36,18 @@ debug_print() {
 
 # Function to escape YAML special characters in environment variables
 escape_yaml() {
-    echo "$1" | sed 's/"/\\"/g' | sed 's/\$/\\$/g'
+    echo "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\$/\$\$/g'
 }
 
 # Function to map Docker restart policies to Docker Compose equivalents
 map_restart_policy() {
     local policy="$1"
     case "$policy" in
-        no)
-            echo "no"
-            ;;
-        on-failure)
-            echo "on-failure"
-            ;;
-        unless-stopped)
-            echo "unless-stopped"
-            ;;
-        always)
-            echo "always"
+        no|on-failure|unless-stopped|always)
+            echo "$policy"
             ;;
         *)
-            echo "$policy"
+            echo "no"
             ;;
     esac
 }
@@ -68,7 +63,7 @@ generate_service() {
     inspect_json=$(docker inspect "$container_id")
 
     # Extract container and image details
-    local container_name image_name stdin_open tty entrypoint cmd healthcheck_test init restart_policy dns_servers networks cap_add shm_size sysctls ports volumes envs
+    local container_name image_name stdin_open tty entrypoint cmd healthcheck_test init restart_policy dns_servers networks cap_add shm_size sysctls volumes envs
     container_name=$(echo "$inspect_json" | jq -r '.[0].Name' | sed 's|^/||')
     image_name=$(echo "$inspect_json" | jq -r '.[0].Config.Image')
     stdin_open=$(echo "$inspect_json" | jq -r '.[0].Config.OpenStdin')
@@ -83,10 +78,11 @@ generate_service() {
     cap_add=$(echo "$inspect_json" | jq -c '.[0].HostConfig.CapAdd // empty')
     shm_size=$(echo "$inspect_json" | jq -r '.[0].HostConfig.ShmSize')
     sysctls=$(echo "$inspect_json" | jq -c '.[0].HostConfig.Sysctls // empty')
-    ports=$(echo "$inspect_json" | jq -r '.[0].NetworkSettings.Ports // empty')
     volumes=$(echo "$inspect_json" | jq -r '.[0].Mounts[]? | "\(.Source):\(.Destination)"' | sed "s|$escaped_home|\$HOME|g" | awk '{print "      - \"" $0 "\""}')
     envs=$(echo "$inspect_json" | jq -r '.[0].Config.Env[]?' | while IFS= read -r env; do
-        echo "      - \"$(escape_yaml "$env")\""
+        key=$(echo "$env" | cut -d'=' -f1)
+        value=$(echo "$env" | cut -d'=' -f2-)
+        echo "      $key: \"$(escape_yaml "$value")\""
     done)
 
     debug_print "Container: $container_name"
@@ -113,15 +109,15 @@ generate_service() {
         echo "    stdin_open: $stdin_open"
         echo "    tty: $tty"
 
-        if [ -n "$entrypoint" ]; then
+        if [ -n "$entrypoint" ] && [ "$entrypoint" != "null" ] && [ "$entrypoint" != "[]" ]; then
             echo "    entrypoint: $entrypoint"
         fi
 
-        if [ -n "$cmd" ]; then
+        if [ -n "$cmd" ] && [ "$cmd" != "null" ] && [ "$cmd" != "[]" ]; then
             echo "    command: $cmd"
         fi
 
-        if [ -n "$healthcheck_test" ] && [ "$healthcheck_test" != "[]" ] && [ "$healthcheck_test" != "null" ]; then
+        if [ -n "$healthcheck_test" ] && [ "$healthcheck_test" != "null" ] && [ "$healthcheck_test" != "[]" ]; then
             echo "    healthcheck:"
             echo "      test: $healthcheck_test"
         fi
@@ -139,7 +135,8 @@ generate_service() {
         fi
 
         if [ -n "$dns_servers" ]; then
-            echo "    dns: [$(echo "$dns_servers" | sed 's/,/", "/g' | sed 's/^/"/; s/$/"/')]"
+            echo "    dns:"
+            echo "$dns_servers" | tr ',' '\n' | sed 's/^/      - "/; s/$/"/'
         fi
 
         if [ -n "$cap_add" ] && [ "$cap_add" != "[]" ]; then
@@ -183,17 +180,17 @@ generate_service() {
         custom_networks=$(echo "$networks" | jq -r 'to_entries[] | select(.key != "bridge" and .key != "host") | .key')
         if [ -n "$custom_networks" ]; then
             echo "    networks:"
-            echo "$networks" | jq -r 'to_entries[] | select(.key != "bridge" and .key != "host") | "      " + .key + ":\n        ipv4_address: " + (.value.IPAddress // "null")' | while IFS= read -r network_def; do
-                local net_name ip_addr
-                net_name=$(echo "$network_def" | awk -F':' '{print $1}' | xargs)
-                ip_addr=$(echo "$network_def" | awk -F':' '{print $2}' | xargs)
+            # Use process substitution to avoid subshell
+            while read -r net_entry; do
+                net_name=$(echo "$net_entry" | jq -r '.key')
+                ip_addr=$(echo "$net_entry" | jq -r '.value.IPAddress // empty')
                 echo "      \"$net_name\":"
-                if [ "$ip_addr" != "null" ]; then
+                if [ -n "$ip_addr" ]; then
                     echo "        ipv4_address: \"$ip_addr\""
                 fi
                 # Collect unique networks for later
                 networks_ref+=("$net_name")
-            done
+            done < <(echo "$networks" | jq -c 'to_entries[] | select(.key != "bridge" and .key != "host")')
         fi
 
         echo ""
@@ -242,9 +239,12 @@ escaped_home=$(echo "$HOME" | sed 's|/|\\/|g')
 declare -a networks_list
 
 # Loop through each running Docker container to capture its configuration
-docker ps -q | while read -r container_id; do
+while read -r container_id; do
     generate_service "$container_id" "$COMPOSE_FILE" networks_list
-done
+done < <(docker ps -q)
+
+# Debug: Print collected networks
+debug_print "Collected Networks: ${networks_list[@]}"
 
 # Extract unique network names and append them to the end of the file
 generate_networks_section "$COMPOSE_FILE" "${networks_list[@]}"
