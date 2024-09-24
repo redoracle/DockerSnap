@@ -29,12 +29,14 @@ jobs:
       # Step 1: Checkout the repository
       - uses: actions/checkout@v4
 
-      # Step 2: Set up QEMU and Docker Buildx (optional, for multi-platform builds)
+      # Step 2: Set up QEMU and Docker Buildx (for multi-platform builds)
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
+        with:
+          install: true
 
       # Step 3: Login to Docker Hub
       - name: Docker Hub Login
@@ -43,8 +45,7 @@ jobs:
           registry: ${{ env.DOCKER_REGISTRY }}
           username: ${{ secrets.DOCKER_USER }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-          ecr: false            # Explicitly disable ECR login
-          logout: false         # Prevent automatic logout
+        continue-on-error: true   # Retry even if login fails
 
       # Step 4: Login to GitHub Container Registry
       - name: GitHub Container Registry Login
@@ -53,33 +54,18 @@ jobs:
           registry: ${{ env.DS_GITHUB_REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-          ecr: false            # Explicitly disable ECR login
-          logout: false         # Prevent automatic logout
+        continue-on-error: true   # Retry even if login fails
 
-      # Step 5: Build DockerSnap Image
+      # Step 5: Build DockerSnap Image for multiple platforms (e.g., linux/amd64, linux/arm64)
       - name: Build DockerSnap Image
         run: |
-          # Build the Docker image for Docker Hub
-          docker build . -t ${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKER_USER }}/dockersnap:latest
-          
-          # Tag the image for GitHub Container Registry
-          docker tag ${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKER_USER }}/dockersnap:latest ${{ env.DS_GITHUB_REGISTRY }}/${{ github.repository_owner }}/dockersnap:latest
+          docker buildx create --use
+          docker buildx build . --platform linux/amd64,linux/arm64 \
+            -t ${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKER_USER }}/dockersnap:latest \
+            -t ${{ env.DS_GITHUB_REGISTRY }}/${{ github.repository_owner }}/dockersnap:latest \
+            --push   # Push the image directly after build to avoid separate push step
 
-      # Step 6: Push DockerSnap Image to Docker Hub and GitHub Container Registry
-      - name: Push DockerSnap Image
-        run: |
-          # Push to Docker Hub
-          docker push ${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKER_USER }}/dockersnap:latest
-          
-          # Push to GitHub Container Registry
-          docker push ${{ env.DS_GITHUB_REGISTRY }}/${{ github.repository_owner }}/dockersnap:latest
-
-      # Step 7: Cleanup Docker Images
-      - name: Cleanup Docker Images
-        run: |
-          docker image prune -a --force
-
-      # Step 8: Add summary details
+      # Step 6: Add summary details
       - name: Add Summary Details
         if: always()
         run: |
@@ -88,3 +74,8 @@ jobs:
           echo "* Docker Image (GitHub): [${{ env.DS_GITHUB_REGISTRY }}/${{ github.repository_owner }}/dockersnap:latest](https://${{ env.DS_GITHUB_REGISTRY }}/${{ github.repository_owner }}/dockersnap)" >> $GITHUB_STEP_SUMMARY
           echo "* Branch: ${{ github.event.inputs.branch }}" >> $GITHUB_STEP_SUMMARY
           echo "* Testing: ${{ github.event.inputs.testing }}" >> $GITHUB_STEP_SUMMARY
+
+      # Step 7: Cleanup Docker Images
+      - name: Cleanup Docker Images
+        run: |
+          docker image prune -a --force
