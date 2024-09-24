@@ -1,0 +1,23 @@
+version: 2
+updates:
+  # Keep npm dependencies up to date in the client folder
+  - package-ecosystem: "npm"
+    directory: "/client"       # Location of the client package.json file
+    schedule:
+      interval: "weekly"       # Check for updates weekly
+    ignore:
+      - dependency-name: "some-dependency" # (Optional) Ignore specific dependencies if needed
+
+  # Keep npm dependencies up to date in the server folder
+  - package-ecosystem: "npm"
+    directory: "/server"       # Location of the server package.json file
+    schedule:
+      interval: "weekly"       # Check for updates weekly
+    ignore:
+      - dependency-name: "some-dependency" # (Optional) Ignore specific dependencies if needed
+
+  # Keep GitHub Actions up to date for the whole project
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
