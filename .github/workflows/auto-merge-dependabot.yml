@@ -25,7 +25,7 @@ jobs:
         id: compatibility
         run: |
           # Extract the compatibility score from labels
-          COMPATIBILITY_LABEL=$(jq --raw-output '.pull_request.labels[] | select(.name | startswith("compatibility:")) | .name' $GITHUB_EVENT_PATH)
+          COMPATIBILITY_LABEL=$(jq --raw-output '.pull_request.labels[]? | select(.name != null) | select(.name | startswith("compatibility:")) | .name' "$GITHUB_EVENT_PATH")
           
           if [ -z "$COMPATIBILITY_LABEL" ]; then
             echo "compatibility=0" >> $GITHUB_ENV
@@ -40,13 +40,16 @@ jobs:
       # Step 3: Check Compatibility Threshold
       - name: Check Compatibility Threshold
         run: |
-          if [ "$COMPATIBILITY" -ge 90 ]; then
+          if [ -n "$compatibility" ] && [ "$compatibility" -ge 90 ]; then
             echo "ready_to_merge=true" >> $GITHUB_ENV
             echo "Compatibility threshold met."
           else
             echo "ready_to_merge=false" >> $GITHUB_ENV
             echo "Compatibility threshold not met."
           fi
+
+      - name: Print event.json
+        run: cat "$GITHUB_EVENT_PATH"
 
       # Step 4: Merge PR if Compatible
       - name: Merge PR
@@ -80,11 +83,11 @@ jobs:
       - name: Add Summary Details
         if: always()
         run: |
-          echo "## Summary Details" >> $GITHUB_STEP_SUMMARY
-          echo "* PR Number: #${{ github.event.pull_request.number }}" >> $GITHUB_STEP_SUMMARY
-          echo "* Compatibility Score: ${{ env.compatibility }}%" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ env.ready_to_merge }}" == "true" ]; then
-            echo "* Action: PR merged automatically." >> $GITHUB_STEP_SUMMARY
+          echo "## Summary Details" >> "$GITHUB_STEP_SUMMARY"
+          echo "* PR Number: #${{ github.event.pull_request.number }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "* Compatibility Score: ${{ env.compatibility }}%" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$ready_to_merge" == "true" ]; then
+            echo "* Action: PR merged automatically." >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "* Action: PR not merged. Compatibility below threshold." >> $GITHUB_STEP_SUMMARY
+            echo "* Action: PR not merged. Compatibility below threshold." >> "$GITHUB_STEP_SUMMARY"
           fi
