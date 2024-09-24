@@ -1,6 +1,7 @@
 name: Auto-Merge Dependabot PRs with High Compatibility
 
 on:
+  workflow_dispatch:  # Adds manual trigger
   pull_request:
     types: [opened, labeled, synchronize, reopened]
 
@@ -13,7 +14,7 @@ jobs:
   auto-merge:
     runs-on: ubuntu-latest
     if: |
-      github.actor == 'dependabot[bot]' || 'dependabot' || github.actor == 'dependabot-preview[bot]'
+      github.actor == 'dependabot[bot]' || github.actor == 'dependabot' || github.actor == 'dependabot-preview[bot]'
 
     steps:
       # Step 1: Checkout the repository
@@ -28,12 +29,12 @@ jobs:
           COMPATIBILITY_LABEL=$(jq --raw-output '.pull_request.labels[]? | select(.name != null) | select(.name | startswith("compatibility:")) | .name' "$GITHUB_EVENT_PATH")
           
           if [ -z "$COMPATIBILITY_LABEL" ]; then
-            echo "compatibility=0" >> $GITHUB_ENV
+            echo "compatibility=0" >> "$GITHUB_ENV"
             echo "No compatibility label found. Setting compatibility to 0%."
           else
             # Extract numeric value
             SCORE=$(echo "$COMPATIBILITY_LABEL" | grep -oP '\d+')
-            echo "compatibility=$SCORE" >> $GITHUB_ENV
+            echo "compatibility=$SCORE" >> "$GITHUB_ENV"
             echo "Detected compatibility score: $SCORE%"
           fi
 
@@ -41,15 +42,12 @@ jobs:
       - name: Check Compatibility Threshold
         run: |
           if [ -n "$compatibility" ] && [ "$compatibility" -ge 90 ]; then
-            echo "ready_to_merge=true" >> $GITHUB_ENV
+            echo "ready_to_merge=true" >> "$GITHUB_ENV"
             echo "Compatibility threshold met."
           else
-            echo "ready_to_merge=false" >> $GITHUB_ENV
+            echo "ready_to_merge=false" >> "$GITHUB_ENV"
             echo "Compatibility threshold not met."
           fi
-
-      - name: Print event.json
-        run: cat "$GITHUB_EVENT_PATH"
 
       # Step 4: Merge PR if Compatible
       - name: Merge PR
@@ -85,7 +83,7 @@ jobs:
         run: |
           echo "## Summary Details" >> "$GITHUB_STEP_SUMMARY"
           echo "* PR Number: #${{ github.event.pull_request.number }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "* Compatibility Score: ${{ env.compatibility }}%" >> "$GITHUB_STEP_SUMMARY"
+          echo "* Compatibility Score: $compatibility%" >> "$GITHUB_STEP_SUMMARY"
           if [ "$ready_to_merge" == "true" ]; then
             echo "* Action: PR merged automatically." >> "$GITHUB_STEP_SUMMARY"
           else
