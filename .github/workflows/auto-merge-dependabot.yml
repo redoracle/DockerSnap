@@ -1,0 +1,70 @@
+name: Auto-Merge Dependabot PRs with High Compatibility
+
+on:
+  pull_request:
+    types: [opened, labeled, synchronize, reopened]
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+    if: |
+      github.actor == 'dependabot[bot]' || github.actor == 'dependabot-preview[bot]'
+
+    steps:
+      # Step 1: Checkout the repository
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      # Step 2: Set up GitHub CLI
+      - name: Set up GitHub CLI
+        uses: cli/cli@v2
+        with:
+          version: latest
+
+      # Step 3: Determine Compatibility Score
+      - name: Get Compatibility Score
+        id: compatibility
+        run: |
+          # Extract the compatibility score from labels
+          COMPATIBILITY_LABEL=$(jq --raw-output '.pull_request.labels[] | select(.name | startswith("compatibility:")) | .name' $GITHUB_EVENT_PATH)
+          
+          if [ -z "$COMPATIBILITY_LABEL" ]; then
+            echo "compatibility=0" >> $GITHUB_ENV
+            echo "No compatibility label found. Setting compatibility to 0%."
+          else
+            # Extract numeric value
+            SCORE=$(echo "$COMPATIBILITY_LABEL" | grep -oP '\d+')
+            echo "compatibility=$SCORE" >> $GITHUB_ENV
+            echo "Detected compatibility score: $SCORE%"
+          fi
+
+      # Step 4: Check Compatibility Threshold
+      - name: Check Compatibility Threshold
+        id: check_compatibility
+        run: |
+          if [ "$COMPATIBILITY" -ge 90 ]; then
+            echo "ready_to_merge=true" >> $GITHUB_ENV
+            echo "Compatibility threshold met."
+          else
+            echo "ready_to_merge=false" >> $GITHUB_ENV
+            echo "Compatibility threshold not met."
+          fi
+
+      # Step 5: Merge PR if Compatible
+      - name: Merge PR
+        if: env.ready_to_merge == 'true'
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          pull-request-number: ${{ github.event.pull_request.number }}
+          merge-method: squash  # You can choose 'merge', 'squash', or 'rebase'
+
+      # Optional: Add a comment indicating the PR was auto-merged
+      - name: Add Merge Comment
+        if: env.ready_to_merge == 'true'
+        uses: peter-evans/create-or-update-comment@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            🎉 This Dependabot PR has been automatically merged as it meets the compatibility threshold of 90% or higher.
