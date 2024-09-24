@@ -38,7 +38,21 @@ jobs:
         with:
           install: true
 
-      # Step 3: Login to Docker Hub
+      # Step 3: Check if DOCKER_USER and repository_owner are valid
+      - name: Check environment variables
+        run: |
+          echo "DOCKER_USER=${{ secrets.DOCKER_USER }}"
+          echo "GITHUB REPOSITORY OWNER=${{ github.repository_owner }}"
+          if [ -z "${{ secrets.DOCKER_USER }}" ]; then
+            echo "DOCKER_USER is empty, failing..."
+            exit 1
+          fi
+          if [ -z "${{ github.repository_owner }}" ]; then
+            echo "GITHUB repository owner is empty, failing..."
+            exit 1
+          fi
+
+      # Step 4: Login to Docker Hub
       - name: Docker Hub Login
         uses: docker/login-action@v2
         with:
@@ -47,7 +61,7 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
         continue-on-error: true   # Retry even if login fails
 
-      # Step 4: Login to GitHub Container Registry
+      # Step 5: Login to GitHub Container Registry
       - name: GitHub Container Registry Login
         uses: docker/login-action@v2
         with:
@@ -56,26 +70,26 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true   # Retry even if login fails
 
-      # Step 5: Build DockerSnap Image for multiple platforms (e.g., linux/amd64, linux/arm64)
+      # Step 6: Build DockerSnap Image for multiple platforms (e.g., linux/amd64, linux/arm64)
       - name: Build DockerSnap Image
         run: |
           docker buildx create --use
           docker buildx build . --platform linux/amd64,linux/arm64 \
             -t ${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKER_USER }}/dockersnap:latest \
-            -t ${{ env.DS_GITHUB_REGISTRY }}/${{ github.repository_owner }}dockersnap:latest \
+            -t ${{ env.DS_GITHUB_REGISTRY }}/${{ github.repository_owner }}/dockersnap:latest \
             --push   # Push the image directly after build to avoid separate push step
 
-      # Step 6: Add summary details
+      # Step 7: Add summary details
       - name: Add Summary Details
         if: always()
         run: |
           echo "## Summary Details" >> $GITHUB_STEP_SUMMARY
-          echo "* Docker Image (Docker Hub): [${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKER_USER }}/dockersnap:latest](https://${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKER_USER }}/dockersnap)" >> $GITHUB_STEP_SUMMARY
+          echo "* Docker Image (Docker Hub): [${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKER_USER }}/dockersnap:latest](https://${{ env.DOCKER_REGISTRY }}/r/${{ secrets.DOCKER_USER }}/dockersnap)" >> $GITHUB_STEP_SUMMARY
           echo "* Docker Image (GitHub): [${{ env.DS_GITHUB_REGISTRY }}/${{ github.repository_owner }}/dockersnap:latest](https://${{ env.DS_GITHUB_REGISTRY }}/${{ github.repository_owner }}/dockersnap)" >> $GITHUB_STEP_SUMMARY
           echo "* Branch: ${{ github.event.inputs.branch }}" >> $GITHUB_STEP_SUMMARY
           echo "* Testing: ${{ github.event.inputs.testing }}" >> $GITHUB_STEP_SUMMARY
 
-      # Step 7: Cleanup Docker Images
+      # Step 8: Cleanup Docker Images
       - name: Cleanup Docker Images
         run: |
           docker image prune -a --force
