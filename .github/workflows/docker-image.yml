@@ -43,6 +43,8 @@ jobs:
           registry: ${{ env.DOCKER_REGISTRY }}
           username: ${{ secrets.DOCKER_USER }}
           password: ${{ secrets.DOCKER_PASSWORD }}
+          ecr: false            # Explicitly disable ECR login
+          logout: false         # Prevent automatic logout
 
       # Step 4: Login to GitHub Container Registry
       - name: GitHub Container Registry Login
@@ -51,18 +53,25 @@ jobs:
           registry: ${{ env.DS_GITHUB_REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+          ecr: false            # Explicitly disable ECR login
+          logout: false         # Prevent automatic logout
 
       # Step 5: Build DockerSnap Image
       - name: Build DockerSnap Image
         run: |
-          # Build the Docker image
+          # Build the Docker image for Docker Hub
           docker build . -t ${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKER_USER }}/dockersnap:latest
+          
+          # Tag the image for GitHub Container Registry
           docker tag ${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKER_USER }}/dockersnap:latest ${{ env.DS_GITHUB_REGISTRY }}/${{ github.repository_owner }}/dockersnap:latest
 
       # Step 6: Push DockerSnap Image to Docker Hub and GitHub Container Registry
       - name: Push DockerSnap Image
         run: |
+          # Push to Docker Hub
           docker push ${{ env.DOCKER_REGISTRY }}/${{ secrets.DOCKER_USER }}/dockersnap:latest
+          
+          # Push to GitHub Container Registry
           docker push ${{ env.DS_GITHUB_REGISTRY }}/${{ github.repository_owner }}/dockersnap:latest
 
       # Step 7: Cleanup Docker Images

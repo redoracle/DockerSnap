@@ -4,6 +4,11 @@ on:
   pull_request:
     types: [opened, labeled, synchronize, reopened]
 
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
 jobs:
   auto-merge:
     runs-on: ubuntu-latest
@@ -15,13 +20,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      # Step 2: Set up GitHub CLI
-      - name: Set up GitHub CLI
-        uses: cli/cli@v2
-        with:
-          version: latest
-
-      # Step 3: Determine Compatibility Score
+      # Step 2: Determine Compatibility Score
       - name: Get Compatibility Score
         id: compatibility
         run: |
@@ -38,9 +37,8 @@ jobs:
             echo "Detected compatibility score: $SCORE%"
           fi
 
-      # Step 4: Check Compatibility Threshold
+      # Step 3: Check Compatibility Threshold
       - name: Check Compatibility Threshold
-        id: check_compatibility
         run: |
           if [ "$COMPATIBILITY" -ge 90 ]; then
             echo "ready_to_merge=true" >> $GITHUB_ENV
@@ -50,21 +48,43 @@ jobs:
             echo "Compatibility threshold not met."
           fi
 
-      # Step 5: Merge PR if Compatible
+      # Step 4: Merge PR if Compatible
       - name: Merge PR
         if: env.ready_to_merge == 'true'
-        uses: peter-evans/enable-pull-request-automerge@v3
+        uses: actions/github-script@v6
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          pull-request-number: ${{ github.event.pull_request.number }}
-          merge-method: squash  # You can choose 'merge', 'squash', or 'rebase'
+          script: |
+            await github.pulls.merge({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              merge_method: 'squash',
+              commit_title: 'Automatically merged by GitHub Actions based on compatibility score.',
+              commit_message: ''
+            });
 
-      # Optional: Add a comment indicating the PR was auto-merged
+      # Step 5: Add Merge Comment
       - name: Add Merge Comment
         if: env.ready_to_merge == 'true'
-        uses: peter-evans/create-or-update-comment@v3
+        uses: actions/github-script@v6
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          issue-number: ${{ github.event.pull_request.number }}
-          body: |
-            🎉 This Dependabot PR has been automatically merged as it meets the compatibility threshold of 90% or higher.
+          script: |
+            await github.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: '🎉 This Dependabot PR has been automatically merged as it meets the compatibility threshold of 90% or higher.'
+            });
+
+      # Step 6: Add Summary Details
+      - name: Add Summary Details
+        if: always()
+        run: |
+          echo "## Summary Details" >> $GITHUB_STEP_SUMMARY
+          echo "* PR Number: #${{ github.event.pull_request.number }}" >> $GITHUB_STEP_SUMMARY
+          echo "* Compatibility Score: ${{ env.compatibility }}%" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ env.ready_to_merge }}" == "true" ]; then
+            echo "* Action: PR merged automatically." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "* Action: PR not merged. Compatibility below threshold." >> $GITHUB_STEP_SUMMARY
+          fi
