@@ -5,7 +5,6 @@
 ![Docker Image Size](https://img.shields.io/docker/image-size/redoracle/dockersnap/latest)
 ![Docker Pulls](https://img.shields.io/docker/pulls/redoracle/dockersnap.svg)
 ![Build Status](https://github.com/redoracle/DockerSnap/actions/workflows/docker-image.yml/badge.svg)
-![Docker Hub](https://img.shields.io/docker/pulls/redoracle/dockersnap)
 
 # DockSnap
 
