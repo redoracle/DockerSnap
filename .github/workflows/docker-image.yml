@@ -72,7 +72,7 @@ jobs:
         with:
           registry: ${{ env.DS_GITHUB_REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.WEB_GITHUB_TOKEN }}
         continue-on-error: true   # Retry even if login fails
 
       # Step 6: Build DockerSnap Image for multiple platforms (e.g., linux/amd64, linux/arm64)
@@ -140,14 +140,14 @@ jobs:
             const release = releases.data.find(r => r.tag_name === tag);
             core.setOutput('exists', release ? 'true' : 'false');
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WEB_GITHUB_TOKEN: ${{ secrets.WEB_GITHUB_TOKEN }}
 
       # Step 4: Create GitHub Release (only if it doesn't exist)
       - name: Create GitHub Release
         id: create_release
         uses: actions/create-release@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WEB_GITHUB_TOKEN: ${{ secrets.WEB_GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.get_tag.outputs.tag }}
           release_name: Release ${{ steps.get_tag.outputs.tag }}
@@ -170,7 +170,7 @@ jobs:
       # - name: Upload Release Asset
       #   uses: actions/upload-release-asset@v1
       #   env:
-      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #     WEB_GITHUB_TOKEN: ${{ secrets.WEB_GITHUB_TOKEN }}
       #   with:
       #     upload_url: ${{ steps.create_release.outputs.upload_url }}
       #     asset_path: ./path/to/asset
