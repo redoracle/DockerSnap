@@ -1,3 +1,12 @@
+![GitHub Repo Stars](https://img.shields.io/github/stars/redoracle/DockerSnap.svg?style=social&label=Star)
+![GitHub Forks](https://img.shields.io/github/forks/redoracle/DockerSnap.svg?style=social&label=Fork)
+![GitHub Issues](https://img.shields.io/github/issues/redoracle/DockerSnap.svg)
+![GitHub License](https://img.shields.io/github/license/redoracle/DockerSnap.svg)
+![Docker Image Size](https://img.shields.io/docker/image-size/redoracle/dockersnap/latest)
+![Docker Pulls](https://img.shields.io/docker/pulls/redoracle/dockersnap.svg)
+![Build Status](https://github.com/redoracle/DockerSnap/actions/workflows/docker-image.yml/badge.svg)
+![Docker Hub](https://img.shields.io/docker/pulls/redoracle/dockersnap)
+
 # DockSnap
 
 ![DockSnap Logo](https://raw.githubusercontent.com/redoracle/DockerSnap/main/DockerSnap%20logo.webp)
