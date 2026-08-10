@@ -60,16 +60,21 @@ jobs:
           # Login to Docker Hub
           echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USER}" --password-stdin
 
-          # Login to GitHub Container Registry
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin || true
-
-          # Build and push multi-platform image with version + latest tags
+          # Build and push to Docker Hub (primary)
           docker buildx build . \
             --platform linux/amd64,linux/arm64 \
             -t docker.io/${DOCKER_USER}/dockersnap:latest \
             -t docker.io/${DOCKER_USER}/dockersnap:${VERSION} \
-            -t ghcr.io/${{ github.repository_owner }}/dockersnap:latest \
-            -t ghcr.io/${{ github.repository_owner }}/dockersnap:${VERSION} \
             --push
 
-          echo "Docker image built and pushed for ${VERSION}"
+          echo "Docker Hub image pushed for ${VERSION}"
+
+          # Push to GitHub Container Registry (secondary, non-fatal)
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null || true
+          docker buildx build . \
+            --platform linux/amd64,linux/arm64 \
+            -t ghcr.io/${{ github.repository_owner }}/dockersnap:latest \
+            -t ghcr.io/${{ github.repository_owner }}/dockersnap:${VERSION} \
+            --push 2>/dev/null || echo "Warning: GHCR push failed (non-fatal)"
+
+          echo "Docker image build complete for ${VERSION}"
