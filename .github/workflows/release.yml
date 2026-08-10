@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 concurrency:
   group: release
@@ -60,7 +61,7 @@ jobs:
           echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USER}" --password-stdin
 
           # Login to GitHub Container Registry
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin || true
 
           # Build and push multi-platform image with version + latest tags
           docker buildx build . \
